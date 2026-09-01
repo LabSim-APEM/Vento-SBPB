@@ -1,0 +1,469 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vento SBPB — Parnaíba</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2306222B'/%3E%3Cpath d='M8 2 L10 9 L8 8 L6 9 Z' fill='%234FD1C5'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --agua:#06222B;
+    --painel:#0C333F;
+    --linha:#1B4E5C;
+    --areia:#E9DFC8;
+    --areia-fraca:#9BAEB2;
+    --brilho:#4FD1C5;
+    --alerta:#F2A413;
+    --perigo:#E2603B;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px 16px 56px;
+    background:var(--agua);
+    color:var(--areia);
+    font-family:"Avenir Next","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;
+    border-bottom:1px solid var(--linha);padding-bottom:14px}
+  h1{font-size:20px;font-weight:600;letter-spacing:.01em;margin:0}
+  header p{margin:2px 0 0;color:var(--areia-fraca);font-size:13.5px}
+  .estado{font-size:13px;color:var(--areia-fraca)}
+
+  .instrumento{
+    display:grid;grid-template-columns:220px 1fr;gap:28px;align-items:center;
+    background:var(--painel);border:1px solid var(--linha);border-radius:14px;
+    padding:26px;margin-top:22px;
+  }
+  @media(max-width:620px){.instrumento{grid-template-columns:1fr;justify-items:center;text-align:center}}
+
+  .leitura .knots{font-size:68px;line-height:.95;font-weight:600;font-variant-numeric:tabular-nums}
+  .leitura .knots span{font-size:22px;font-weight:400;color:var(--areia-fraca);margin-left:6px}
+  .leitura .conv{margin:6px 0 0;color:var(--areia-fraca);font-size:14.5px}
+  .leitura .rajada{margin:14px 0 0;font-size:16px}
+  .leitura .rajada b{color:var(--alerta);font-variant-numeric:tabular-nums}
+
+  .faixa{margin-top:18px;padding:12px 14px;border-radius:10px;font-size:14.5px;line-height:1.45}
+  .faixa.calmo{background:rgba(79,209,197,.10);border:1px solid rgba(79,209,197,.35)}
+  .faixa.atencao{background:rgba(242,164,19,.12);border:1px solid rgba(242,164,19,.45)}
+  .faixa.forte{background:rgba(226,96,59,.14);border:1px solid rgba(226,96,59,.5)}
+
+  .grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+    background:var(--linha);border:1px solid var(--linha);border-radius:12px;overflow:hidden;margin-top:18px}
+  .celula{background:var(--painel);padding:14px 16px}
+  .celula dt{font-size:12.5px;color:var(--areia-fraca);margin:0 0 4px}
+  .celula dd{margin:0;font-size:16px;font-variant-numeric:tabular-nums}
+
+  .bruto{margin-top:18px;background:#08283180;border:1px dashed var(--linha);border-radius:10px;padding:14px 16px}
+  .bruto code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:var(--brilho);
+    word-break:break-word;line-height:1.6}
+  .bruto p{margin:10px 0 0;font-size:13px;color:var(--areia-fraca);line-height:1.5}
+
+  .controles{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:20px}
+  button{
+    font:inherit;font-size:14.5px;color:var(--agua);background:var(--brilho);
+    border:0;border-radius:8px;padding:10px 18px;cursor:pointer;
+  }
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.5;cursor:progress}
+  button:focus-visible{outline:2px solid var(--areia);outline-offset:2px}
+  label{font-size:14px;color:var(--areia-fraca);display:flex;align-items:center;gap:8px}
+  input[type=number]{width:64px;font:inherit;font-size:14px;padding:7px 8px;border-radius:7px;
+    border:1px solid var(--linha);background:var(--agua);color:var(--areia)}
+  footer{margin-top:26px;font-size:12.5px;color:var(--areia-fraca);line-height:1.6}
+  .erro{margin-top:18px;border:1px solid var(--perigo);border-radius:10px;padding:14px 16px;font-size:14.5px}
+  .esqueleto{opacity:.35}
+
+  .abas{display:flex;gap:6px;margin-top:18px;border-bottom:1px solid var(--linha)}
+  .abas button{background:transparent;color:var(--areia-fraca);border:0;border-bottom:2px solid transparent;
+    border-radius:0;padding:10px 16px;font-size:15px;cursor:pointer}
+  .abas button:hover{color:var(--areia)}
+  .abas button[aria-selected=true]{color:var(--areia);border-bottom-color:var(--brilho)}
+  .aba[hidden]{display:none}
+  .grafico{width:100%;height:auto;margin-top:14px;background:var(--painel);
+    border:1px solid var(--linha);border-radius:12px;padding:6px}
+  .legenda{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:13.5px;color:var(--areia-fraca)}
+  .chave{display:flex;align-items:center;gap:7px}
+  .chave i{width:22px;height:3px;border-radius:2px;display:inline-block}
+  .chave i.tracejada{height:0;border-top:3px dashed var(--areia-fraca)}
+  .nota{font-size:13px;color:var(--areia-fraca);line-height:1.55;margin:12px 0 0}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Vento no aeroporto de Parnaíba — SBPB</h1>
+      <p>Para operação portuária em Luís Correia</p>
+    </div>
+    <div class="estado" id="estado">carregando…</div>
+  </header>
+
+  <nav class="abas" role="tablist">
+    <button role="tab" id="t-agora" aria-controls="aba-agora" aria-selected="true">Agora</button>
+    <button role="tab" id="t-prev" aria-controls="aba-prev" aria-selected="false">Próximas 3 horas</button>
+  </nav>
+
+  <section class="aba" id="aba-agora" role="tabpanel">
+    <div class="instrumento">
+      <svg id="rosa" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Direção do vento">
+        <circle cx="100" cy="100" r="92" fill="none" stroke="#1B4E5C" stroke-width="1.5"/>
+        <circle cx="100" cy="100" r="74" fill="none" stroke="#1B4E5C" stroke-width="1" stroke-dasharray="2 6"/>
+        <g id="ticks"></g>
+        <text x="100" y="20" text-anchor="middle" fill="#9BAEB2" font-size="12">N</text>
+        <text x="184" y="105" text-anchor="middle" fill="#9BAEB2" font-size="12">L</text>
+        <text x="100" y="192" text-anchor="middle" fill="#9BAEB2" font-size="12">S</text>
+        <text x="16" y="105" text-anchor="middle" fill="#9BAEB2" font-size="12">O</text>
+        <g id="agulha" transform="rotate(0 100 100)" opacity="0">
+          <path d="M100 26 L110 104 L100 96 L90 104 Z" fill="#4FD1C5"/>
+          <circle cx="100" cy="100" r="5" fill="#4FD1C5"/>
+        </g>
+      </svg>
+      <div class="leitura">
+        <div class="knots" id="kt">—<span>nós</span></div>
+        <p class="conv" id="conv">aguardando dados</p>
+        <p class="rajada" id="rajada"></p>
+      </div>
+    </div>
+
+    <div id="faixa"></div>
+    <dl class="grade" id="grade"></dl>
+
+    <div class="bruto">
+      <code id="raw">—</code>
+      <p id="fonte">Fonte: METAR oficial da estação SBPB.</p>
+    </div>
+
+    <div class="controles">
+      <button id="atualizar">Atualizar agora</button>
+    </div>
+  </section>
+
+  <section class="aba" id="aba-prev" role="tabpanel" hidden>
+    <div class="controles">
+      <button id="recarregar-prev">Recarregar previsão</button>
+      <span class="estado" id="prev-estado">não carregada</span>
+    </div>
+    <div id="prev-corpo"></div>
+  </section>
+
+  <div class="controles">
+    <label>Avisar a partir de <input id="limite" type="number" min="5" max="60" value="20"> nós</label>
+    <label><input id="auto" type="checkbox" checked> Atualizar sozinho a cada 30 min</label>
+  </div>
+
+  <footer>
+    A aba <b>Agora</b> traz observação real do anemômetro do aeroporto (METAR, medido a 10 m, publicado de hora em hora).
+    A aba <b>Próximas 3 horas</b> traz previsão de modelo — útil para antecipar janela, não para registrar o que aconteceu.
+    O aeroporto fica a cerca de 15 km do cais, então na beira d'água o valor real varia.
+  </footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const LAT = -2.8938, LON = -41.7320;   // Aeroporto de Parnaíba (SBPB)
+
+(function(){
+  let g = "";
+  for (let a = 0; a < 360; a += 10) {
+    const longo = a % 90 === 0;
+    g += `<line x1="100" y1="${longo ? 12 : 16}" x2="100" y2="${longo ? 26 : 22}"
+           stroke="#1B4E5C" stroke-width="${longo ? 2 : 1}" transform="rotate(${a} 100 100)"/>`;
+  }
+  $("ticks").innerHTML = g;
+})();
+
+const cardeal = d => ["N","NNE","NE","ENE","L","ESE","SE","SSE","S","SSO","SO","OSO","O","ONO","NO","NNO"][Math.round(d/22.5)%16];
+
+async function comTempo(url, ms = 12000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { signal: ctrl.signal, cache: "no-store" }); }
+  finally { clearTimeout(t); }
+}
+
+// ---------- leitura do METAR bruto ----------
+function lerMetar(bruto, fonte) {
+  const txt = bruto.trim().replace(/=$/, "");
+  const toks = txt.split(/\s+/);
+
+  const hora = txt.match(/\b(\d{2})(\d{2})(\d{2})Z\b/);
+  let quando = null;
+  if (hora) {
+    const agora = new Date();
+    let d = Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), +hora[1], +hora[2], +hora[3]);
+    if (d - agora.getTime() > 6*3600*1000) d -= 31*24*3600*1000;  // virada de mês
+    quando = new Date(d);
+  }
+
+  const v = txt.match(/\b(\d{3}|VRB)(\d{2,3})(?:G(\d{2,3}))?(KT|MPS)\b/);
+  if (!v) throw new Error("METAR sem grupo de vento");
+  const paraKt = n => v[4] === "MPS" ? Math.round(n * 1.9438) : n;
+  const variavel = v[1] === "VRB";
+
+  const tt = txt.match(/\b(M?\d{2})\/(M?\d{2})\b/);
+  const temp = tt ? (tt[1].startsWith("M") ? -(+tt[1].slice(1)) : +tt[1]) : null;
+
+  let visib = "—";
+  if (/\bCAVOK\b/.test(txt)) visib = "CAVOK (10 km ou mais)";
+  else {
+    const met = toks.find(t => /^\d{4}$/.test(t) && t !== hora?.[0]);
+    if (met) visib = met === "9999" ? "10 km ou mais" : (+met) + " m";
+  }
+
+  const camadas = toks.filter(t => /^(FEW|SCT|BKN|OVC)\d{3}/.test(t))
+    .map(t => ({FEW:"poucas",SCT:"esparsas",BKN:"muitas",OVC:"encoberto"}[t.slice(0,3)] + " a " + (+t.slice(3,6))*100 + " ft"));
+  const teto = /\bCAVOK\b|\bNSC\b|\bSKC\b|\bNCD\b/.test(txt) ? "sem nuvens significativas"
+             : (camadas.length ? camadas.join(", ") : "—");
+
+  return {
+    metar: txt, quando, variavel,
+    dir: variavel ? null : +v[1],
+    kt: paraKt(+v[2]),
+    rajada: v[3] ? paraKt(+v[3]) : null,
+    temp, visib, teto,
+    fonte: "METAR SBPB · " + fonte
+  };
+}
+
+// 1) METAR bruto (CORS liberado, funciona até em file://)
+async function viaVatsim() {
+  const r = await comTempo("https://metar.vatsim.net/SBPB");
+  if (!r.ok) throw new Error("vatsim " + r.status);
+  const t = (await r.text()).trim();
+  if (!/^SBPB/.test(t)) throw new Error("sem METAR de SBPB");
+  return lerMetar(t, "metar.vatsim.net");
+}
+
+// 2) METAR da NOAA (bloqueia origem file://, funciona quando hospedado)
+async function viaNoaa() {
+  const r = await comTempo("https://aviationweather.gov/api/data/metar?ids=SBPB&format=raw&hours=6");
+  if (!r.ok) throw new Error("NOAA " + r.status);
+  const linhas = (await r.text()).trim().split("\n").filter(l => l.startsWith("SBPB"));
+  if (!linhas.length) throw new Error("NOAA sem METAR");
+  return lerMetar(linhas[0], "aviationweather.gov");
+}
+
+// 3) Reserva: modelo no ponto do aeroporto
+async function viaModelo() {
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
+    "&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&wind_speed_unit=kn&timezone=UTC";
+  const r = await comTempo(url);
+  if (!r.ok) throw new Error("Open-Meteo " + r.status);
+  const d = (await r.json()).current;
+  return {
+    metar: "Sem METAR disponível agora — valores do modelo Open-Meteo no ponto do aeroporto.",
+    quando: new Date(d.time + "Z"),
+    dir: Math.round(d.wind_direction_10m), variavel: false,
+    kt: Math.round(d.wind_speed_10m),
+    rajada: d.wind_gusts_10m != null ? Math.round(d.wind_gusts_10m) : null,
+    temp: d.temperature_2m != null ? Math.round(d.temperature_2m) : null,
+    visib: "—", teto: "—",
+    fonte: "Modelo Open-Meteo em " + LAT + ", " + LON + " (reserva, não é observação)"
+  };
+}
+
+async function buscar() {
+  const btn = $("atualizar");
+  btn.disabled = true;
+  $("estado").textContent = "buscando…";
+  document.querySelector(".instrumento").classList.add("esqueleto");
+  $("faixa").innerHTML = "";
+
+  let dado = null; const falhas = [];
+  for (const tentar of [viaVatsim, viaNoaa, viaModelo]) {
+    try { dado = await tentar(); break; }
+    catch (e) { falhas.push(e.message); }
+  }
+
+  if (dado) render(dado);
+  else {
+    $("estado").textContent = "sem dados";
+    $("faixa").innerHTML = `<div class="erro">Todas as fontes falharam (${falhas.join(" · ")}).
+      Verifique a conexão e toque em “Atualizar agora”.</div>`;
+  }
+
+  btn.disabled = false;
+  document.querySelector(".instrumento").classList.remove("esqueleto");
+}
+
+function render(d) {
+  const kt = d.kt, raj = d.rajada, pico = raj || kt;
+  const limite = Number($("limite").value) || 20;
+
+  $("kt").innerHTML = kt + '<span>nós</span>';
+  $("conv").textContent = `${(kt*1.852).toFixed(0)} km/h · ${(kt*0.5144).toFixed(1)} m/s` +
+    (d.variavel ? " · direção variável" : (d.dir != null ? ` · de ${cardeal(d.dir)} (${d.dir}°)` : ""));
+  $("rajada").innerHTML = raj ? `Rajadas de <b>${raj} nós</b> (${(raj*1.852).toFixed(0)} km/h)` : "Sem rajadas registradas";
+
+  const ag = $("agulha");
+  if (d.dir != null) { ag.setAttribute("transform", `rotate(${(d.dir+180)%360} 100 100)`); ag.setAttribute("opacity","1"); }
+  else ag.setAttribute("opacity", "0.15");
+
+  const f = $("faixa");
+  if (pico >= limite + 8)
+    f.innerHTML = `<div class="faixa forte">Vento forte: pico de ${pico} nós, acima do seu limite de ${limite}. Vale avaliar suspensão de içamento e amarração extra.</div>`;
+  else if (pico >= limite)
+    f.innerHTML = `<div class="faixa atencao">Atenção: pico de ${pico} nós atingiu o limite de ${limite}. Acompanhe as próximas observações.</div>`;
+  else
+    f.innerHTML = `<div class="faixa calmo">Dentro do normal: pico de ${pico} nós, abaixo do limite de ${limite}.</div>`;
+
+  const fmt = (dt, tz) => dt ? dt.toLocaleString("pt-BR", { timeZone: tz, day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "—";
+  const idade = d.quando ? Math.round((Date.now() - d.quando.getTime())/60000) : null;
+
+  $("grade").innerHTML = [
+    ["Observado em (UTC)", fmt(d.quando, "UTC")],
+    ["Hora de Parnaíba", fmt(d.quando, "America/Fortaleza")],
+    ["Idade do dado", idade != null ? idade + " min" : "—"],
+    ["Temperatura", d.temp != null ? d.temp + " °C" : "—"],
+    ["Visibilidade", d.visib],
+    ["Nuvens", d.teto]
+  ].map(([t, v]) => `<div class="celula"><dt>${t}</dt><dd>${v}</dd></div>`).join("");
+
+  $("raw").textContent = d.metar;
+  $("fonte").textContent = "Fonte: " + d.fonte + ". Medição a 10 m de altura.";
+  $("estado").textContent = "atualizado às " + new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+}
+
+$("atualizar").onclick = buscar;
+setInterval(() => { if (!$("auto").checked) return; buscar(); if (!$("aba-prev").hidden) buscarPrevisao(); }, 30*60*1000);
+buscar();
+// ===== aba de previsão =====
+const MODELOS = { gfs_seamless: {nome:"GFS", cor:"#4FD1C5"}, ecmwf_ifs025: {nome:"ECMWF", cor:"#E9DFC8"} };
+
+async function buscarPrevisao() {
+  const b = $("recarregar-prev");
+  b.disabled = true;
+  $("prev-estado").textContent = "consultando modelos…";
+
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
+    "&minutely_15=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&wind_speed_unit=kn&timezone=UTC&forecast_days=2&models=" + Object.keys(MODELOS).join(",");
+
+  try {
+    const r = await comTempo(url, 15000);
+    if (!r.ok) throw new Error("Open-Meteo " + r.status);
+    const m = (await r.json()).minutely_15;
+    if (!m || !m.time) throw new Error("resposta sem série de 15 min");
+
+    // recorta de agora até 3 h à frente
+    const agora = Date.now();
+    const idx = [];
+    m.time.forEach((t, i) => {
+      const ms = new Date(t + "Z").getTime();
+      if (ms >= agora - 15*60*1000 && ms <= agora + 3*3600*1000) idx.push(i);
+    });
+    if (!idx.length) throw new Error("sem passos nas próximas 3 h");
+
+    const series = Object.entries(MODELOS).map(([id, meta]) => {
+      const k = v => m[v + "_" + id] || m[v];   // sem sufixo se a API devolver modelo único
+      return {
+        id, ...meta,
+        kt:     idx.map(i => k("wind_speed_10m")?.[i]),
+        rajada: idx.map(i => k("wind_gusts_10m")?.[i]),
+        dir:    idx.map(i => k("wind_direction_10m")?.[i])
+      };
+    }).filter(s => s.kt.some(v => v != null));
+
+    if (!series.length) throw new Error("modelos sem dados de vento");
+    desenharPrevisao(idx.map(i => new Date(m.time[i] + "Z")), series);
+    $("prev-estado").textContent = "atualizado às " +
+      new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+  } catch (e) {
+    $("prev-estado").textContent = "falhou";
+    $("prev-corpo").innerHTML = `<div class="erro">Não deu para carregar a previsão (${e.message}).
+      Toque em “Recarregar previsão”.</div>`;
+  } finally {
+    b.disabled = false;
+  }
+}
+
+function desenharPrevisao(tempos, series) {
+  const limite = Number($("limite").value) || 20;
+  const L = 44, R = 14, T = 16, B = 52, W = 700, H = 260;
+  const vals = series.flatMap(s => [...s.kt, ...s.rajada]).filter(v => v != null);
+  const topo = Math.max(limite + 6, Math.ceil(Math.max(...vals) / 5) * 5 + 5);
+  const x = i => L + (W - L - R) * (i / Math.max(1, tempos.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / topo);
+
+  let g = "";
+  // grade e escala em nós
+  for (let v = 0; v <= topo; v += 5) {
+    g += `<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="#1B4E5C" stroke-width="1"/>
+          <text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#9BAEB2" font-size="11">${v}</text>`;
+  }
+  // limite operacional
+  g += `<line x1="${L}" y1="${y(limite)}" x2="${W-R}" y2="${y(limite)}" stroke="#E2603B" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <text x="${W-R}" y="${y(limite)-7}" text-anchor="end" fill="#E2603B" font-size="11">seu limite: ${limite} nós</text>`;
+
+  // horas locais
+  tempos.forEach((t, i) => {
+    const mm = t.getUTCMinutes();
+    const meia = (mm === 0 || mm === 30);
+    g += `<line x1="${x(i)}" y1="${H-B}" x2="${x(i)}" y2="${H-B+(meia?6:3)}" stroke="#1B4E5C"/>`;
+    if (meia) g += `<text x="${x(i)}" y="${H-B+20}" text-anchor="middle" fill="#9BAEB2" font-size="11">${
+      t.toLocaleTimeString("pt-BR",{timeZone:"America/Fortaleza",hour:"2-digit",minute:"2-digit"})}</text>`;
+  });
+
+  // setas de direção do primeiro modelo
+  const s0 = series[0];
+  tempos.forEach((t, i) => {
+    if (i % 2 || s0.dir[i] == null) return;
+    g += `<path d="M0 -6 L3 4 L0 2 L-3 4 Z" fill="#4A6E78"
+            transform="translate(${x(i)},${H-16}) rotate(${(s0.dir[i]+180)%360})"/>`;
+  });
+
+  // linhas dos modelos
+  const linha = (arr, cor, tracejado) => {
+    const pts = arr.map((v, i) => v == null ? null : `${x(i)},${y(v)}`).filter(Boolean).join(" ");
+    return `<polyline points="${pts}" fill="none" stroke="${cor}" stroke-width="2"
+             stroke-linejoin="round" ${tracejado ? 'stroke-dasharray="5 4"' : ""}/>`;
+  };
+  series.forEach(s => { g += linha(s.rajada, s.cor, true) + linha(s.kt, s.cor, false); });
+
+  const legenda = series.map(s =>
+    `<span class="chave"><i style="background:${s.cor}"></i>${s.nome}</span>`).join("") +
+    `<span class="chave"><i class="tracejada"></i>rajada</span>`;
+
+  // janelas acima do limite e discordância entre modelos
+  const picos = tempos.map((t, i) => Math.max(...series.map(s => s.rajada[i] ?? s.kt[i] ?? 0)));
+  const acima = tempos.filter((t, i) => picos[i] >= limite);
+  const espalha = Math.max(...tempos.map((t, i) => {
+    const v = series.map(s => s.rajada[i]).filter(n => n != null);
+    return v.length > 1 ? Math.max(...v) - Math.min(...v) : 0;
+  }));
+
+  const hhmm = t => t.toLocaleTimeString("pt-BR",{timeZone:"America/Fortaleza",hour:"2-digit",minute:"2-digit"});
+  let aviso;
+  if (!acima.length) aviso = `<div class="faixa calmo">Nenhum passo das próximas 3 h chega a ${limite} nós.
+    Pico previsto de ${Math.round(Math.max(...picos))} nós.</div>`;
+  else aviso = `<div class="faixa atencao">Rajada de ${limite} nós ou mais prevista entre
+    ${hhmm(acima[0])} e ${hhmm(acima[acima.length-1])}, hora de Parnaíba.
+    Pico de ${Math.round(Math.max(...picos))} nós.</div>`;
+
+  const concord = series.length < 2 ? "" :
+    `<p class="nota">${espalha <= 4
+      ? `Os modelos concordam bem: diferença máxima de ${Math.round(espalha)} nós na rajada.`
+      : `Atenção à incerteza: os modelos divergem em até ${Math.round(espalha)} nós na rajada. Trate o número maior como cenário de planejamento.`}</p>`;
+
+  $("prev-corpo").innerHTML = `
+    ${aviso}
+    <div class="legenda">${legenda}</div>
+    <svg viewBox="0 0 ${W} ${H}" class="grafico" role="img"
+      aria-label="Vento previsto para as próximas três horas">${g}</svg>
+    ${concord}
+    <p class="nota">Eixo vertical em nós; setas mostram de onde o vento sopra (modelo ${s0.nome}).
+      Passo de 15 min interpolado a partir da saída horária dos modelos — não é medição.</p>`;
+}
+
+// ===== abas =====
+function trocarAba(qual) {
+  const mapa = { agora: ["t-agora","aba-agora"], prev: ["t-prev","aba-prev"] };
+  for (const [k, [bt, pn]] of Object.entries(mapa)) {
+    $(bt).setAttribute("aria-selected", String(k === qual));
+    $(pn).hidden = k !== qual;
+  }
+  if (qual === "prev" && $("prev-estado").textContent === "não carregada") buscarPrevisao();
+}
+$("t-agora").onclick = () => trocarAba("agora");
+$("t-prev").onclick = () => trocarAba("prev");
+$("recarregar-prev").onclick = buscarPrevisao;
+$("limite").onchange = () => { if (!$("aba-prev").hidden) buscarPrevisao(); buscar(); };
+</script>
