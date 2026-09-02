@@ -84,6 +84,10 @@
   .chave{display:flex;align-items:center;gap:7px}
   .chave i{width:22px;height:3px;border-radius:2px;display:inline-block}
   .chave i.tracejada{height:0;border-top:3px dashed var(--areia-fraca)}
+  .cartoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
+  .cartao{background:#0A2C36;border-radius:10px;padding:14px 16px}
+  .cartao span{display:block;font-size:12.5px;color:var(--areia-fraca);margin-bottom:5px}
+  .cartao strong{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
   .nota{font-size:13px;color:var(--areia-fraca);line-height:1.55;margin:12px 0 0}
 </style>
 
@@ -99,6 +103,7 @@
   <nav class="abas" role="tablist">
     <button role="tab" id="t-agora" aria-controls="aba-agora" aria-selected="true">Agora</button>
     <button role="tab" id="t-prev" aria-controls="aba-prev" aria-selected="false">Próximas 3 horas</button>
+    <button role="tab" id="t-dias" aria-controls="aba-dias" aria-selected="false">Próximos 2 dias</button>
   </nav>
 
   <section class="aba" id="aba-agora" role="tabpanel">
@@ -144,14 +149,22 @@
     <div id="prev-corpo"></div>
   </section>
 
+  <section class="aba" id="aba-dias" role="tabpanel" hidden>
+    <div class="controles">
+      <button id="recarregar-dias">Recarregar previsão</button>
+      <span class="estado" id="dias-estado">não carregada</span>
+    </div>
+    <div id="dias-corpo"></div>
+  </section>
+
   <div class="controles">
-    <label>Avisar a partir de <input id="limite" type="number" min="5" max="60" value="20"> nós</label>
+    <label>Gatilho de rajada <input id="limite" type="number" min="5" max="60" value="15"> nós</label>
     <label><input id="auto" type="checkbox" checked> Atualizar sozinho a cada 30 min</label>
   </div>
 
   <footer>
     A aba <b>Agora</b> traz observação real do anemômetro do aeroporto (METAR, medido a 10 m, publicado de hora em hora).
-    A aba <b>Próximas 3 horas</b> traz previsão de modelo — útil para antecipar janela, não para registrar o que aconteceu.
+    As abas <b>Próximas 3 horas</b> e <b>Próximos 2 dias</b> trazem previsão de modelo — úteis para antecipar janela, não para registrar o que aconteceu.
     O aeroporto fica a cerca de 15 km do cais, então na beira d'água o valor real varia.
   </footer>
 </div>
@@ -322,12 +335,97 @@ function render(d) {
   $("estado").textContent = "atualizado às " + new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
 }
 
-$("atualizar").onclick = buscar;
-setInterval(() => { if (!$("auto").checked) return; buscar(); if (!$("aba-prev").hidden) buscarPrevisao(); }, 30*60*1000);
-buscar();
-// ===== aba de previsão =====
+// ===== previsão (3 h e 2 dias) =====
 const MODELOS = { gfs_seamless: {nome:"GFS", cor:"#4FD1C5"}, ecmwf_ifs025: {nome:"ECMWF", cor:"#E9DFC8"} };
+const hhmm = t => t.toLocaleTimeString("pt-BR", {timeZone:"America/Fortaleza", hour:"2-digit", minute:"2-digit"});
+const diaHora = t => t.toLocaleString("pt-BR", {timeZone:"America/Fortaleza", weekday:"short", hour:"2-digit"}).replace(".","");
 
+function separar(bloco, sufixos, tempos, deQuando, ateQuando) {
+  const idx = [];
+  bloco.time.forEach((t, i) => {
+    const ms = new Date(t + "Z").getTime();
+    if (ms >= deQuando && ms <= ateQuando) idx.push(i);
+  });
+  if (!idx.length) throw new Error("sem passos no período pedido");
+  const series = Object.entries(MODELOS).map(([id, meta]) => {
+    const k = v => bloco[v + "_" + id] || bloco[v];
+    return {
+      id, ...meta,
+      kt:     idx.map(i => k("wind_speed_10m")?.[i]),
+      rajada: idx.map(i => k("wind_gusts_10m")?.[i]),
+      dir:    idx.map(i => k("wind_direction_10m")?.[i])
+    };
+  }).filter(s => s.kt.some(v => v != null));
+  if (!series.length) throw new Error("modelos sem dados de vento");
+  return { tempos: idx.map(i => new Date(bloco.time[i] + "Z")), series };
+}
+
+// pico de rajada por passo, considerando todos os modelos
+const picos = series => series[0].rajada.map((_, i) =>
+  Math.max(...series.map(s => s.rajada[i] ?? s.kt[i] ?? 0)));
+
+// ---------- gráfico comum às duas abas ----------
+function grafico(tempos, series, op) {
+  const L = 44, R = 14, T = 16, B = 52, W = 700, H = op.altura || 260;
+  const vals = series.flatMap(s => [...s.kt, ...s.rajada]).filter(v => v != null);
+  const topo = Math.max(op.limite + 6, Math.ceil(Math.max(...vals) / 5) * 5 + 5);
+  const x = i => L + (W - L - R) * (i / Math.max(1, tempos.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / topo);
+  const passo = 5 * Math.ceil(topo / 40);
+
+  let g = "";
+  for (let v = 0; v <= topo; v += passo) {
+    g += `<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="#1B4E5C" stroke-width="1"/>
+          <text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#9BAEB2" font-size="11">${v}</text>`;
+  }
+  g += `<line x1="${L}" y1="${y(op.limite)}" x2="${W-R}" y2="${y(op.limite)}" stroke="#E2603B" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <text x="${W-R}" y="${y(op.limite)-7}" text-anchor="end" fill="#E2603B" font-size="11">gatilho: ${op.limite} nós</text>`;
+
+  tempos.forEach((t, i) => {
+    const r = op.rotular(t, i);
+    if (!r) return;
+    if (r.divisoria)
+      g += `<line x1="${x(i)}" y1="${T}" x2="${x(i)}" y2="${H-B}" stroke="#2A6270" stroke-width="1"/>`;
+    g += `<line x1="${x(i)}" y1="${H-B}" x2="${x(i)}" y2="${H-B+6}" stroke="#1B4E5C"/>
+          <text x="${x(i)}" y="${H-B+20}" text-anchor="middle" fill="#9BAEB2" font-size="11">${r.texto}</text>`;
+  });
+
+  const s0 = series[0];
+  tempos.forEach((t, i) => {
+    if (i % (op.passoSeta || 2) || s0.dir[i] == null) return;
+    g += `<path d="M0 -6 L3 4 L0 2 L-3 4 Z" fill="#4A6E78"
+            transform="translate(${x(i)},${H-16}) rotate(${(s0.dir[i]+180)%360})"/>`;
+  });
+
+  const linha = (arr, cor, tracejado) => {
+    const pts = arr.map((v, i) => v == null ? null : `${x(i)},${y(v)}`).filter(Boolean).join(" ");
+    return `<polyline points="${pts}" fill="none" stroke="${cor}" stroke-width="2"
+             stroke-linejoin="round" ${tracejado ? 'stroke-dasharray="5 4"' : ""}/>`;
+  };
+  series.forEach(s => { g += linha(s.rajada, s.cor, true) + linha(s.kt, s.cor, false); });
+
+  if (op.marcar != null && tempos[op.marcar])
+    g += `<circle cx="${x(op.marcar)}" cy="${y(op.valorMarca)}" r="5" fill="#F2A413"/>`;
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="${op.rotulo}">${g}</svg>`;
+}
+
+const legenda = series => series.map(s =>
+  `<span class="chave"><i style="background:${s.cor}"></i>${s.nome}</span>`).join("") +
+  `<span class="chave"><i class="tracejada"></i>rajada</span>`;
+
+function concordancia(series, tempos) {
+  if (series.length < 2) return "";
+  const esp = Math.max(...tempos.map((t, i) => {
+    const v = series.map(s => s.rajada[i]).filter(n => n != null);
+    return v.length > 1 ? Math.max(...v) - Math.min(...v) : 0;
+  }));
+  return `<p class="nota">${esp <= 4
+    ? `Os modelos concordam bem: diferença máxima de ${Math.round(esp)} nós na rajada.`
+    : `Atenção à incerteza: os modelos divergem em até ${Math.round(esp)} nós na rajada. Trate o número maior como cenário de planejamento.`}</p>`;
+}
+
+// ---------- aba: próximas 3 horas ----------
 async function buscarPrevisao() {
   const b = $("recarregar-prev");
   b.disabled = true;
@@ -336,36 +434,40 @@ async function buscarPrevisao() {
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
     "&minutely_15=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
     "&wind_speed_unit=kn&timezone=UTC&forecast_days=2&models=" + Object.keys(MODELOS).join(",");
-
   try {
     const r = await comTempo(url, 15000);
     if (!r.ok) throw new Error("Open-Meteo " + r.status);
     const m = (await r.json()).minutely_15;
     if (!m || !m.time) throw new Error("resposta sem série de 15 min");
 
-    // recorta de agora até 3 h à frente
     const agora = Date.now();
-    const idx = [];
-    m.time.forEach((t, i) => {
-      const ms = new Date(t + "Z").getTime();
-      if (ms >= agora - 15*60*1000 && ms <= agora + 3*3600*1000) idx.push(i);
-    });
-    if (!idx.length) throw new Error("sem passos nas próximas 3 h");
+    // busca 4 h para poder olhar 1 h além do gatilho
+    const largo = separar(m, null, null, agora - 15*60*1000, agora + 4*3600*1000);
+    const corte = largo.tempos.findIndex(t => t.getTime() > agora + 3*3600*1000);
+    const n = corte === -1 ? largo.tempos.length : corte;
 
-    const series = Object.entries(MODELOS).map(([id, meta]) => {
-      const k = v => m[v + "_" + id] || m[v];   // sem sufixo se a API devolver modelo único
-      return {
-        id, ...meta,
-        kt:     idx.map(i => k("wind_speed_10m")?.[i]),
-        rajada: idx.map(i => k("wind_gusts_10m")?.[i]),
-        dir:    idx.map(i => k("wind_direction_10m")?.[i])
-      };
-    }).filter(s => s.kt.some(v => v != null));
+    const gatilho = avaliarGatilho(largo.tempos, picos(largo.series), Number($("limite").value) || 15);
 
-    if (!series.length) throw new Error("modelos sem dados de vento");
-    desenharPrevisao(idx.map(i => new Date(m.time[i] + "Z")), series);
-    $("prev-estado").textContent = "atualizado às " +
-      new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+    $("prev-corpo").innerHTML =
+      gatilho.html +
+      `<div class="legenda">${legenda(largo.series)}</div>` +
+      grafico(largo.tempos.slice(0, n), largo.series.map(s => ({
+        ...s, kt: s.kt.slice(0, n), rajada: s.rajada.slice(0, n), dir: s.dir.slice(0, n)
+      })), {
+        limite: Number($("limite").value) || 15,
+        rotulo: "Vento previsto para as próximas três horas",
+        marcar: gatilho.i != null && gatilho.i < n ? gatilho.i : null,
+        valorMarca: gatilho.valor,
+        rotular: (t, i) => {
+          const mm = t.getUTCMinutes();
+          return (mm === 0 || mm === 30) ? { texto: hhmm(t) } : null;
+        }
+      }) +
+      concordancia(largo.series, largo.tempos) +
+      `<p class="nota">Eixo vertical em nós; setas mostram de onde o vento sopra (modelo ${largo.series[0].nome}).
+        Passo de 15 min interpolado a partir da saída horária dos modelos — não é medição.</p>`;
+
+    $("prev-estado").textContent = "atualizado às " + hhmm(new Date());
   } catch (e) {
     $("prev-estado").textContent = "falhou";
     $("prev-corpo").innerHTML = `<div class="erro">Não deu para carregar a previsão (${e.message}).
@@ -375,95 +477,120 @@ async function buscarPrevisao() {
   }
 }
 
-function desenharPrevisao(tempos, series) {
-  const limite = Number($("limite").value) || 20;
-  const L = 44, R = 14, T = 16, B = 52, W = 700, H = 260;
-  const vals = series.flatMap(s => [...s.kt, ...s.rajada]).filter(v => v != null);
-  const topo = Math.max(limite + 6, Math.ceil(Math.max(...vals) / 5) * 5 + 5);
-  const x = i => L + (W - L - R) * (i / Math.max(1, tempos.length - 1));
-  const y = v => T + (H - T - B) * (1 - v / topo);
-
-  let g = "";
-  // grade e escala em nós
-  for (let v = 0; v <= topo; v += 5) {
-    g += `<line x1="${L}" y1="${y(v)}" x2="${W-R}" y2="${y(v)}" stroke="#1B4E5C" stroke-width="1"/>
-          <text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#9BAEB2" font-size="11">${v}</text>`;
+// regra: rajada atinge o gatilho e, uma hora depois, está mais alta
+function avaliarGatilho(tempos, pico, gatilho) {
+  for (let i = 0; i < tempos.length; i++) {
+    if (pico[i] < gatilho) continue;
+    const j = tempos.findIndex(t => t.getTime() >= tempos[i].getTime() + 3600*1000);
+    if (j === -1) break;                       // sem uma hora inteira à frente para julgar
+    const saldo = pico[j] - pico[i];
+    if (saldo > 0) return {
+      i, valor: pico[i],
+      html: `<div class="faixa atencao">Rajada cruza ${gatilho} nós por volta das ${hhmm(tempos[i])}
+        e sobe para ${Math.round(pico[j])} nós até ${hhmm(tempos[j])}. Tendência de alta sustentada
+        (saldo de +${Math.round(saldo)} nós na hora), hora de Parnaíba.</div>`
+    };
   }
-  // limite operacional
-  g += `<line x1="${L}" y1="${y(limite)}" x2="${W-R}" y2="${y(limite)}" stroke="#E2603B" stroke-width="1.5" stroke-dasharray="6 4"/>
-        <text x="${W-R}" y="${y(limite)-7}" text-anchor="end" fill="#E2603B" font-size="11">seu limite: ${limite} nós</text>`;
-
-  // horas locais
-  tempos.forEach((t, i) => {
-    const mm = t.getUTCMinutes();
-    const meia = (mm === 0 || mm === 30);
-    g += `<line x1="${x(i)}" y1="${H-B}" x2="${x(i)}" y2="${H-B+(meia?6:3)}" stroke="#1B4E5C"/>`;
-    if (meia) g += `<text x="${x(i)}" y="${H-B+20}" text-anchor="middle" fill="#9BAEB2" font-size="11">${
-      t.toLocaleTimeString("pt-BR",{timeZone:"America/Fortaleza",hour:"2-digit",minute:"2-digit"})}</text>`;
-  });
-
-  // setas de direção do primeiro modelo
-  const s0 = series[0];
-  tempos.forEach((t, i) => {
-    if (i % 2 || s0.dir[i] == null) return;
-    g += `<path d="M0 -6 L3 4 L0 2 L-3 4 Z" fill="#4A6E78"
-            transform="translate(${x(i)},${H-16}) rotate(${(s0.dir[i]+180)%360})"/>`;
-  });
-
-  // linhas dos modelos
-  const linha = (arr, cor, tracejado) => {
-    const pts = arr.map((v, i) => v == null ? null : `${x(i)},${y(v)}`).filter(Boolean).join(" ");
-    return `<polyline points="${pts}" fill="none" stroke="${cor}" stroke-width="2"
-             stroke-linejoin="round" ${tracejado ? 'stroke-dasharray="5 4"' : ""}/>`;
+  return {
+    i: null, valor: null,
+    html: `<div class="faixa calmo">Nenhum alerta nas próximas 3 h: a rajada não cruza ${gatilho} nós
+      com tendência de alta na hora seguinte. Pico previsto de ${Math.round(Math.max(...pico))} nós.</div>`
   };
-  series.forEach(s => { g += linha(s.rajada, s.cor, true) + linha(s.kt, s.cor, false); });
+}
 
-  const legenda = series.map(s =>
-    `<span class="chave"><i style="background:${s.cor}"></i>${s.nome}</span>`).join("") +
-    `<span class="chave"><i class="tracejada"></i>rajada</span>`;
+// ---------- aba: próximos 2 dias ----------
+async function buscarDias() {
+  const b = $("recarregar-dias");
+  b.disabled = true;
+  $("dias-estado").textContent = "consultando modelos…";
 
-  // janelas acima do limite e discordância entre modelos
-  const picos = tempos.map((t, i) => Math.max(...series.map(s => s.rajada[i] ?? s.kt[i] ?? 0)));
-  const acima = tempos.filter((t, i) => picos[i] >= limite);
-  const espalha = Math.max(...tempos.map((t, i) => {
-    const v = series.map(s => s.rajada[i]).filter(n => n != null);
-    return v.length > 1 ? Math.max(...v) - Math.min(...v) : 0;
-  }));
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
+    "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&wind_speed_unit=kn&timezone=UTC&forecast_days=3&models=" + Object.keys(MODELOS).join(",");
+  try {
+    const r = await comTempo(url, 15000);
+    if (!r.ok) throw new Error("Open-Meteo " + r.status);
+    const h = (await r.json()).hourly;
+    if (!h || !h.time) throw new Error("resposta sem série horária");
 
-  const hhmm = t => t.toLocaleTimeString("pt-BR",{timeZone:"America/Fortaleza",hour:"2-digit",minute:"2-digit"});
-  let aviso;
-  if (!acima.length) aviso = `<div class="faixa calmo">Nenhum passo das próximas 3 h chega a ${limite} nós.
-    Pico previsto de ${Math.round(Math.max(...picos))} nós.</div>`;
-  else aviso = `<div class="faixa atencao">Rajada de ${limite} nós ou mais prevista entre
-    ${hhmm(acima[0])} e ${hhmm(acima[acima.length-1])}, hora de Parnaíba.
-    Pico de ${Math.round(Math.max(...picos))} nós.</div>`;
+    const agora = Date.now();
+    const { tempos, series } = separar(h, null, null, agora - 3600*1000, agora + 48*3600*1000);
+    const pico = picos(series);
+    const limite = Number($("limite").value) || 15;
 
-  const concord = series.length < 2 ? "" :
-    `<p class="nota">${espalha <= 4
-      ? `Os modelos concordam bem: diferença máxima de ${Math.round(espalha)} nós na rajada.`
-      : `Atenção à incerteza: os modelos divergem em até ${Math.round(espalha)} nós na rajada. Trate o número maior como cenário de planejamento.`}</p>`;
+    // resumo por dia local
+    const porDia = {};
+    tempos.forEach((t, i) => {
+      const d = t.toLocaleDateString("pt-BR", {timeZone:"America/Fortaleza", weekday:"short", day:"2-digit", month:"2-digit"});
+      (porDia[d] = porDia[d] || []).push({ t, p: pico[i], k: series[0].kt[i] });
+    });
+    const cartoes = Object.entries(porDia).slice(0, 3).map(([d, arr]) => {
+      const alto = arr.reduce((a, b) => b.p > a.p ? b : a);
+      return `<div class="cartao"><span>${d} · pico de rajada</span>
+        <strong>${Math.round(alto.p)} nós</strong>
+        <span style="margin-top:5px">por volta das ${hhmm(alto.t)}</span></div>`;
+    }).join("");
 
-  $("prev-corpo").innerHTML = `
-    ${aviso}
-    <div class="legenda">${legenda}</div>
-    <svg viewBox="0 0 ${W} ${H}" class="grafico" role="img"
-      aria-label="Vento previsto para as próximas três horas">${g}</svg>
-    ${concord}
-    <p class="nota">Eixo vertical em nós; setas mostram de onde o vento sopra (modelo ${s0.nome}).
-      Passo de 15 min interpolado a partir da saída horária dos modelos — não é medição.</p>`;
+    const horasAcima = pico.filter(p => p >= limite).length;
+
+    $("dias-corpo").innerHTML =
+      `<div class="faixa ${horasAcima ? "atencao" : "calmo"}">
+        ${horasAcima
+          ? `${horasAcima} das próximas 48 h com rajada prevista de ${limite} nós ou mais. Pico de ${Math.round(Math.max(...pico))} nós.`
+          : `Nenhuma hora das próximas 48 h com rajada prevista acima de ${limite} nós.`}
+       </div>
+       <div class="cartoes">${cartoes}</div>
+       <div class="legenda">${legenda(series)}</div>` +
+      grafico(tempos, series, {
+        limite, altura: 280, passoSeta: 3,
+        rotulo: "Vento previsto para os próximos dois dias",
+        rotular: (t, i) => {
+          const hLocal = Number(t.toLocaleString("en-GB", {timeZone:"America/Fortaleza", hour:"2-digit", hour12:false}));
+          if (hLocal === 0) return { texto: diaHora(t), divisoria: true };
+          return hLocal % 6 === 0 ? { texto: String(hLocal).padStart(2,"0") + "h" } : null;
+        }
+      }) +
+      concordancia(series, tempos) +
+      `<p class="nota">Passo de 1 hora, hora de Parnaíba; linhas verticais marcam a virada do dia.
+        Em 48 h a previsão erra mais na intensidade da rajada que na direção — use para planejar turno, não para decidir manobra.</p>`;
+
+    $("dias-estado").textContent = "atualizado às " + hhmm(new Date());
+  } catch (e) {
+    $("dias-estado").textContent = "falhou";
+    $("dias-corpo").innerHTML = `<div class="erro">Não deu para carregar a previsão (${e.message}).
+      Toque em “Recarregar previsão”.</div>`;
+  } finally {
+    b.disabled = false;
+  }
 }
 
 // ===== abas =====
+const ABAS = { agora:["t-agora","aba-agora"], prev:["t-prev","aba-prev"], dias:["t-dias","aba-dias"] };
 function trocarAba(qual) {
-  const mapa = { agora: ["t-agora","aba-agora"], prev: ["t-prev","aba-prev"] };
-  for (const [k, [bt, pn]] of Object.entries(mapa)) {
+  for (const [k, [bt, pn]] of Object.entries(ABAS)) {
     $(bt).setAttribute("aria-selected", String(k === qual));
     $(pn).hidden = k !== qual;
   }
   if (qual === "prev" && $("prev-estado").textContent === "não carregada") buscarPrevisao();
+  if (qual === "dias" && $("dias-estado").textContent === "não carregada") buscarDias();
 }
 $("t-agora").onclick = () => trocarAba("agora");
-$("t-prev").onclick = () => trocarAba("prev");
+$("t-prev").onclick  = () => trocarAba("prev");
+$("t-dias").onclick  = () => trocarAba("dias");
 $("recarregar-prev").onclick = buscarPrevisao;
-$("limite").onchange = () => { if (!$("aba-prev").hidden) buscarPrevisao(); buscar(); };
+$("recarregar-dias").onclick = buscarDias;
+$("limite").onchange = () => {
+  buscar();
+  if (!$("aba-prev").hidden) buscarPrevisao();
+  if (!$("aba-dias").hidden) buscarDias();
+};
+
+$("atualizar").onclick = buscar;
+setInterval(() => {
+  if (!$("auto").checked) return;
+  buscar();
+  if (!$("aba-prev").hidden) buscarPrevisao();
+  if (!$("aba-dias").hidden) buscarDias();
+}, 30*60*1000);
+buscar();
 </script>
