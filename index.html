@@ -169,7 +169,7 @@
 
   <footer>
     A aba <b>Agora</b> traz observação real do anemômetro do aeroporto (METAR, medido a 10 m, publicado de hora em hora).
-    As abas <b>Próximas 3 horas</b> e <b>Próximos 2 dias</b> trazem previsão de modelo — úteis para antecipar janela, não para registrar o que aconteceu.
+    As abas <b>Próximas 3 horas</b> e <b>Próximos 2 dias</b> trazem previsão de modelo para o meio do canal de Luís Correia — úteis para antecipar janela, não para registrar o que aconteceu.
     A maré vem da tábua oficial da Marinha para o Porto de Luís Correia e a chance de chuva é de modelo.
     O aeroporto fica a cerca de 15 km do cais, então na beira d'água o valor real varia.
   </footer>
@@ -290,7 +290,7 @@ function curvaMare(agora) {
 
 // chance de chuva, do mesmo modelo do vento
 async function buscarChuva() {
-  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + PORTO.lat + "&longitude=" + PORTO.lon +
     "&hourly=precipitation_probability&daily=precipitation_probability_max,precipitation_sum" +
     "&timezone=America%2FFortaleza&forecast_days=1";
   try {
@@ -488,12 +488,34 @@ function render(d) {
   $("estado").textContent = "atualizado às " + new Date().toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
 }
 
-// ===== previsão (3 h e 2 dias) =====
+// ===== previsão (3 h e 2 dias), em 3 pontos do Porto de Luís Correia =====
+// meio do canal do Porto de Luís Correia; um ponto só, porque a malha dos
+// modelos globais (11 a 25 km) não distingue posições dentro do porto
+const PORTO = { nome:"meio do canal de Luís Correia", lat:-2.8634, lon:-41.6480 };
 const MODELOS = { gfs_seamless: {nome:"GFS", cor:"#4FD1C5"}, ecmwf_ifs025: {nome:"ECMWF", cor:"#E9DFC8"} };
+let cachePrev = null, cacheDias = null;
+
 const hhmm = t => t.toLocaleTimeString("pt-BR", {timeZone:"America/Fortaleza", hour:"2-digit", minute:"2-digit"});
 const diaHora = t => t.toLocaleString("pt-BR", {timeZone:"America/Fortaleza", weekday:"short", hour:"2-digit"}).replace(".","");
 
-function separar(bloco, sufixos, tempos, deQuando, ateQuando) {
+function urlPorto(bloco, dias) {
+  return "https://api.open-meteo.com/v1/forecast" +
+    "?latitude=" + PORTO.lat + "&longitude=" + PORTO.lon +
+    "&" + bloco + "=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&wind_speed_unit=kn&timezone=UTC&forecast_days=" + dias +
+    "&models=" + Object.keys(MODELOS).join(",");
+}
+
+async function buscarPorto(bloco, dias) {
+  const r = await comTempo(urlPorto(bloco, dias), 18000);
+  if (!r.ok) throw new Error("Open-Meteo " + r.status);
+  const j = await r.json();
+  const b = (Array.isArray(j) ? j[0] : j)[bloco];
+  if (!b || !b.time) throw new Error("resposta sem série " + bloco);
+  return b;
+}
+
+function separar(bloco, deQuando, ateQuando) {
   const idx = [];
   bloco.time.forEach((t, i) => {
     const ms = new Date(t + "Z").getTime();
@@ -513,11 +535,10 @@ function separar(bloco, sufixos, tempos, deQuando, ateQuando) {
   return { tempos: idx.map(i => new Date(bloco.time[i] + "Z")), series };
 }
 
-// pico de rajada por passo, considerando todos os modelos
 const picos = series => series[0].rajada.map((_, i) =>
   Math.max(...series.map(s => s.rajada[i] ?? s.kt[i] ?? 0)));
 
-// ---------- gráfico comum às duas abas ----------
+// ---------- gráfico comum ----------
 function grafico(tempos, series, op) {
   const L = 44, R = 14, T = 16, B = 52, W = 700, H = op.altura || 260;
   const vals = series.flatMap(s => [...s.kt, ...s.rajada]).filter(v => v != null);
@@ -537,8 +558,7 @@ function grafico(tempos, series, op) {
   tempos.forEach((t, i) => {
     const r = op.rotular(t, i);
     if (!r) return;
-    if (r.divisoria)
-      g += `<line x1="${x(i)}" y1="${T}" x2="${x(i)}" y2="${H-B}" stroke="#2A6270" stroke-width="1"/>`;
+    if (r.divisoria) g += `<line x1="${x(i)}" y1="${T}" x2="${x(i)}" y2="${H-B}" stroke="#2A6270" stroke-width="1"/>`;
     g += `<line x1="${x(i)}" y1="${H-B}" x2="${x(i)}" y2="${H-B+6}" stroke="#1B4E5C"/>
           <text x="${x(i)}" y="${H-B+20}" text-anchor="middle" fill="#9BAEB2" font-size="11">${r.texto}</text>`;
   });
@@ -579,47 +599,18 @@ function concordancia(series, tempos) {
 }
 
 // ---------- aba: próximas 3 horas ----------
-async function buscarPrevisao() {
+async function buscarPrevisao(usarCache) {
   const b = $("recarregar-prev");
   b.disabled = true;
-  $("prev-estado").textContent = "consultando modelos…";
-
-  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
-    "&minutely_15=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
-    "&wind_speed_unit=kn&timezone=UTC&forecast_days=2&models=" + Object.keys(MODELOS).join(",");
+  if (!usarCache) $("prev-estado").textContent = "consultando modelos…";
   try {
-    const r = await comTempo(url, 15000);
-    if (!r.ok) throw new Error("Open-Meteo " + r.status);
-    const m = (await r.json()).minutely_15;
-    if (!m || !m.time) throw new Error("resposta sem série de 15 min");
-
-    const agora = Date.now();
-    // busca 4 h para poder olhar 1 h além do gatilho
-    const largo = separar(m, null, null, agora - 15*60*1000, agora + 4*3600*1000);
-    const corte = largo.tempos.findIndex(t => t.getTime() > agora + 3*3600*1000);
-    const n = corte === -1 ? largo.tempos.length : corte;
-
-    const gatilho = avaliarGatilho(largo.tempos, picos(largo.series), Number($("limite").value) || 15);
-
-    $("prev-corpo").innerHTML =
-      gatilho.html +
-      `<div class="legenda">${legenda(largo.series)}</div>` +
-      grafico(largo.tempos.slice(0, n), largo.series.map(s => ({
-        ...s, kt: s.kt.slice(0, n), rajada: s.rajada.slice(0, n), dir: s.dir.slice(0, n)
-      })), {
-        limite: Number($("limite").value) || 15,
-        rotulo: "Vento previsto para as próximas três horas",
-        marcar: gatilho.i != null && gatilho.i < n ? gatilho.i : null,
-        valorMarca: gatilho.valor,
-        rotular: (t, i) => {
-          const mm = t.getUTCMinutes();
-          return (mm === 0 || mm === 30) ? { texto: hhmm(t) } : null;
-        }
-      }) +
-      concordancia(largo.series, largo.tempos) +
-      `<p class="nota">Eixo vertical em nós; setas mostram de onde o vento sopra (modelo ${largo.series[0].nome}).
-        Passo de 15 min interpolado a partir da saída horária dos modelos — não é medição.</p>`;
-
+    if (!usarCache || !cachePrev) {
+      const agora = Date.now();
+      const bloco = await buscarPorto("minutely_15", 2);
+      // 4 h de dados para julgar 1 h além do gatilho, mostrando 3 h
+      cachePrev = { agora, dados: separar(bloco, agora - 15*60*1000, agora + 4*3600*1000) };
+    }
+    desenharPrev();
     $("prev-estado").textContent = "atualizado às " + hhmm(new Date());
   } catch (e) {
     $("prev-estado").textContent = "falhou";
@@ -630,12 +621,40 @@ async function buscarPrevisao() {
   }
 }
 
+function desenharPrev() {
+  const { agora, dados } = cachePrev;
+  const { tempos, series } = dados;
+  const limite = Number($("limite").value) || 15;
+  const corte = tempos.findIndex(t => t.getTime() > agora + 3*3600*1000);
+  const n = corte === -1 ? tempos.length : corte;
+  const gat = avaliarGatilho(tempos, picos(series), limite);
+
+  $("prev-corpo").innerHTML =
+    gat.html +
+    `<div class="legenda">${legenda(series)}</div>` +
+    grafico(tempos.slice(0, n), series.map(s => ({
+      ...s, kt: s.kt.slice(0, n), rajada: s.rajada.slice(0, n), dir: s.dir.slice(0, n)
+    })), {
+      limite,
+      rotulo: "Vento previsto para as próximas três horas no " + PORTO.nome,
+      marcar: gat.i != null && gat.i < n ? gat.i : null,
+      valorMarca: gat.valor,
+      rotular: t => {
+        const mm = t.getUTCMinutes();
+        return (mm === 0 || mm === 30) ? { texto: hhmm(t) } : null;
+      }
+    }) +
+    concordancia(series, tempos) +
+    `<p class="nota">Eixo vertical em nós; setas mostram de onde o vento sopra (modelo ${series[0].nome}).
+      Passo de 15 min interpolado a partir da saída horária dos modelos — não é medição.</p>`;
+}
+
 // regra: rajada atinge o gatilho e, uma hora depois, está mais alta
 function avaliarGatilho(tempos, pico, gatilho) {
   for (let i = 0; i < tempos.length; i++) {
     if (pico[i] < gatilho) continue;
     const j = tempos.findIndex(t => t.getTime() >= tempos[i].getTime() + 3600*1000);
-    if (j === -1) break;                       // sem uma hora inteira à frente para julgar
+    if (j === -1) break;
     const saldo = pico[j] - pico[i];
     if (saldo > 0) return {
       i, valor: pico[i],
@@ -652,61 +671,17 @@ function avaliarGatilho(tempos, pico, gatilho) {
 }
 
 // ---------- aba: próximos 2 dias ----------
-async function buscarDias() {
+async function buscarDias(usarCache) {
   const b = $("recarregar-dias");
   b.disabled = true;
-  $("dias-estado").textContent = "consultando modelos…";
-
-  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON +
-    "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
-    "&wind_speed_unit=kn&timezone=UTC&forecast_days=3&models=" + Object.keys(MODELOS).join(",");
+  if (!usarCache) $("dias-estado").textContent = "consultando modelos…";
   try {
-    const r = await comTempo(url, 15000);
-    if (!r.ok) throw new Error("Open-Meteo " + r.status);
-    const h = (await r.json()).hourly;
-    if (!h || !h.time) throw new Error("resposta sem série horária");
-
-    const agora = Date.now();
-    const { tempos, series } = separar(h, null, null, agora - 3600*1000, agora + 48*3600*1000);
-    const pico = picos(series);
-    const limite = Number($("limite").value) || 15;
-
-    // resumo por dia local
-    const porDia = {};
-    tempos.forEach((t, i) => {
-      const d = t.toLocaleDateString("pt-BR", {timeZone:"America/Fortaleza", weekday:"short", day:"2-digit", month:"2-digit"});
-      (porDia[d] = porDia[d] || []).push({ t, p: pico[i], k: series[0].kt[i] });
-    });
-    const cartoes = Object.entries(porDia).slice(0, 3).map(([d, arr]) => {
-      const alto = arr.reduce((a, b) => b.p > a.p ? b : a);
-      return `<div class="cartao"><span>${d} · pico de rajada</span>
-        <strong>${Math.round(alto.p)} nós</strong>
-        <span style="margin-top:5px">por volta das ${hhmm(alto.t)}</span></div>`;
-    }).join("");
-
-    const horasAcima = pico.filter(p => p >= limite).length;
-
-    $("dias-corpo").innerHTML =
-      `<div class="faixa ${horasAcima ? "atencao" : "calmo"}">
-        ${horasAcima
-          ? `${horasAcima} das próximas 48 h com rajada prevista de ${limite} nós ou mais. Pico de ${Math.round(Math.max(...pico))} nós.`
-          : `Nenhuma hora das próximas 48 h com rajada prevista acima de ${limite} nós.`}
-       </div>
-       <div class="cartoes">${cartoes}</div>
-       <div class="legenda">${legenda(series)}</div>` +
-      grafico(tempos, series, {
-        limite, altura: 280, passoSeta: 3,
-        rotulo: "Vento previsto para os próximos dois dias",
-        rotular: (t, i) => {
-          const hLocal = Number(t.toLocaleString("en-GB", {timeZone:"America/Fortaleza", hour:"2-digit", hour12:false}));
-          if (hLocal === 0) return { texto: diaHora(t), divisoria: true };
-          return hLocal % 6 === 0 ? { texto: String(hLocal).padStart(2,"0") + "h" } : null;
-        }
-      }) +
-      concordancia(series, tempos) +
-      `<p class="nota">Passo de 1 hora, hora de Parnaíba; linhas verticais marcam a virada do dia.
-        Em 48 h a previsão erra mais na intensidade da rajada que na direção — use para planejar turno, não para decidir manobra.</p>`;
-
+    if (!usarCache || !cacheDias) {
+      const agora = Date.now();
+      const bloco = await buscarPorto("hourly", 3);
+      cacheDias = { agora, dados: separar(bloco, agora - 3600*1000, agora + 48*3600*1000) };
+    }
+    desenharDias();
     $("dias-estado").textContent = "atualizado às " + hhmm(new Date());
   } catch (e) {
     $("dias-estado").textContent = "falhou";
@@ -715,6 +690,47 @@ async function buscarDias() {
   } finally {
     b.disabled = false;
   }
+}
+
+function desenharDias() {
+  const { tempos, series } = cacheDias.dados;
+  const pico = picos(series);
+  const limite = Number($("limite").value) || 15;
+
+  const porDia = {};
+  tempos.forEach((t, i) => {
+    const d = t.toLocaleDateString("pt-BR", {timeZone:"America/Fortaleza", weekday:"short", day:"2-digit", month:"2-digit"});
+    (porDia[d] = porDia[d] || []).push({ t, p: pico[i] });
+  });
+  const cartoes = Object.entries(porDia).slice(0, 3).map(([d, arr]) => {
+    const alto = arr.reduce((a, b) => b.p > a.p ? b : a);
+    return `<div class="cartao"><span>${d} · pico de rajada</span>
+      <strong>${Math.round(alto.p)} nós</strong>
+      <span style="margin-top:5px">por volta das ${hhmm(alto.t)}</span></div>`;
+  }).join("");
+
+  const horasAcima = pico.filter(p => p >= limite).length;
+
+  $("dias-corpo").innerHTML =
+    `<div class="faixa ${horasAcima ? "atencao" : "calmo"}">
+      ${horasAcima
+        ? `${horasAcima} das próximas 48 h com rajada prevista de ${limite} nós ou mais. Pico de ${Math.round(Math.max(...pico))} nós.`
+        : `Nenhuma hora das próximas 48 h com rajada prevista acima de ${limite} nós.`}
+     </div>
+     <div class="cartoes">${cartoes}</div>
+     <div class="legenda">${legenda(series)}</div>` +
+    grafico(tempos, series, {
+      limite, altura: 280, passoSeta: 3,
+      rotulo: "Vento previsto para os próximos dois dias no " + PORTO.nome,
+      rotular: t => {
+        const hLocal = Number(t.toLocaleString("en-GB", {timeZone:"America/Fortaleza", hour:"2-digit", hour12:false}));
+        if (hLocal === 0) return { texto: diaHora(t), divisoria: true };
+        return hLocal % 6 === 0 ? { texto: String(hLocal).padStart(2,"0") + "h" } : null;
+      }
+    }) +
+    concordancia(series, tempos) +
+    `<p class="nota">Passo de 1 hora, hora de Parnaíba; linhas verticais marcam a virada do dia.
+      Em 48 h a previsão erra mais na intensidade da rajada que na direção — use para planejar turno, não para decidir manobra.</p>`;
 }
 
 // ===== abas =====
@@ -730,20 +746,19 @@ function trocarAba(qual) {
 $("t-agora").onclick = () => trocarAba("agora");
 $("t-prev").onclick  = () => trocarAba("prev");
 $("t-dias").onclick  = () => trocarAba("dias");
-$("recarregar-prev").onclick = buscarPrevisao;
-$("recarregar-dias").onclick = buscarDias;
+$("recarregar-prev").onclick = () => buscarPrevisao(false);
+$("recarregar-dias").onclick = () => buscarDias(false);
 $("limite").onchange = () => {
   buscar();
-  if (!$("aba-prev").hidden) buscarPrevisao();
-  if (!$("aba-dias").hidden) buscarDias();
+  if (!$("aba-prev").hidden && cachePrev) desenharPrev();
+  if (!$("aba-dias").hidden && cacheDias) desenharDias();
 };
-
 $("atualizar").onclick = buscar;
 setInterval(() => {
   if (!$("auto").checked) return;
   buscar();
-  if (!$("aba-prev").hidden) buscarPrevisao();
-  if (!$("aba-dias").hidden) buscarDias();
+  if (!$("aba-prev").hidden) buscarPrevisao(false);
+  if (!$("aba-dias").hidden) buscarDias(false);
 }, 30*60*1000);
 buscar();
 </script>
